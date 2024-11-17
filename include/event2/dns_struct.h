@@ -72,6 +72,30 @@ struct evdns_server_question {
 	char name[1];
 };
 
+struct evdns_reply_ns {
+	char *name;
+};
+
+struct evdns_reply_mx {
+	ev_uint16_t pref;
+	char *name;
+};
+
+struct evdns_reply_soa {
+	char *nsname;
+	char *email;
+	ev_uint32_t serial;
+	ev_uint32_t refresh;
+	ev_uint32_t retry;
+	ev_uint32_t expire;
+	ev_uint32_t minimum;
+};
+
+struct evdns_reply_txt {
+	ev_uint8_t parts;
+	char *text; // joined string from all parts (divisor \0)
+};
+
 #ifdef __cplusplus
 }
 #endif
