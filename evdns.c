@@ -165,6 +165,7 @@
 #define TYPE_MX        EVDNS_TYPE_MX	/* 15 */
 #define TYPE_TXT       EVDNS_TYPE_TXT	/* 16 */
 #define TYPE_AAAA      EVDNS_TYPE_AAAA	/* 28 */
+#define TYPE_SRV       EVDNS_TYPE_SRV	/* 33 */
 #define TYPE_OPT       EVDNS_TYPE_OPT	/* 41 */
 
 #define CLASS_INET     EVDNS_CLASS_INET
@@ -189,6 +190,7 @@ struct reply {
 		struct evdns_reply_mx *mx;
 		struct evdns_reply_soa *soa;
 		struct evdns_reply_txt *txt;
+		struct evdns_reply_srv *srv;
 		void *raw;
 	} data;
 	char *cname;
@@ -338,6 +340,7 @@ struct server_reply_item {
 		struct evdns_reply_mx *mx;
 		struct evdns_reply_soa *soa;
 		struct evdns_reply_txt *txt;
+		struct evdns_reply_srv *srv;
 	} addon;
 };
 
@@ -1092,6 +1095,18 @@ reply_run_callback(struct event_callback *d, void *user_pointer)
 			    handle->reply.data.aaaa,
 			    user_pointer);
 			break;
+		case TYPE_SRV:
+			handle->user_callback(DNS_ERR_NONE, DNS_SRV,
+				handle->reply.rr_count, handle->ttl,
+				handle->reply.data.srv, user_pointer);
+			if (handle->reply.data.srv)
+			for (i = 0; i < handle->reply.rr_count; ++i) {
+				if (handle->reply.data.srv[i].name) {
+					mm_free(handle->reply.data.srv[i].name);
+					handle->reply.data.srv[i].name = NULL;
+				}
+			}
+			break;
 		default:
 			EVUTIL_ASSERT(0);
 		} // switch
@@ -1573,6 +1588,16 @@ reply_parse(struct evdns_base *base, u8 *packet, int length)
 			reply.rr_count += addrcount;
 			j += 16*addrcount;
 			reply.have_answer = 1;
+		} else if (type == TYPE_SRV && class == CLASS_INET) {
+			GET16(reply.data.srv[reply.rr_count].priority);
+			GET16(reply.data.srv[reply.rr_count].weight);
+			GET16(reply.data.srv[reply.rr_count].port);
+			GET_NAME(srv_err);
+			reply.data.srv[reply.rr_count].name = mm_strdup(tmp_name);
+			if (!reply.data.srv[reply.rr_count].name) goto srv_err;
+			ttl_r = MIN(ttl_r, ttl);
+			reply.rr_count++;
+			reply.have_answer = 1;
 		} else {
 			/* skip over any other type of resource */
 			j += datalength;
@@ -1637,6 +1662,11 @@ mx_err:
 txt_err:
 	for (size_t t = 0; t < reply.rr_count; ++t) {
 		mm_free(reply.data.txt[t].text);
+	}
+	goto err;
+srv_err:
+	for (size_t t = 0; t < reply.rr_count; ++t) {
+		mm_free(reply.data.srv[t].name);
 	}
 	goto err;
 auth_err:
@@ -2568,6 +2598,16 @@ evdns_server_request_add_reply(struct evdns_server_request *req_, int section, c
 					goto error;
 				}
 				memcpy(item->addon.txt->text, data + offset, text_full_len);
+			} else if (item->type == TYPE_SRV) {
+				item->addon.srv = mm_calloc(1, sizeof(struct evdns_reply_srv));
+				if (!item->addon.srv) goto error;
+				memcpy(item->addon.srv, data, sizeof(*item->addon.srv));
+				offset += sizeof(*item->addon.srv);
+				item->addon.srv->name = mm_strdup(data + offset);
+				if (!item->addon.srv->name) {
+					mm_free(item->addon.srv);
+					goto error;
+				}
 			} else {
 				// Other names & TYPE_NS going here
 				if (!(item->data = mm_strdup(data))) goto error;
@@ -2676,7 +2716,7 @@ evdns_server_request_add_mx_reply(struct evdns_server_request *req, const char *
 	char data[sizeof(struct evdns_reply_mx) + EVDNS_NAME_MAX];
 	int len = sizeof(struct evdns_reply_mx);
 	memcpy(data, mx, len);
-	len += evutil_snprintf(data + len, sizeof(data) - len, "%s", mx->name) + 1;
+	evutil_snprintf(data + len, sizeof(data) - len, "%s", mx->name);
 	return evdns_server_request_add_reply(
 		  req, EVDNS_ANSWER_SECTION, name, TYPE_MX, CLASS_INET,
 		  ttl, -1, 1, data);
@@ -2720,6 +2760,19 @@ evdns_server_request_add_txt_reply(struct evdns_server_request *req, const char 
 
 	mm_free(data);
 	return r;
+}
+
+/* exported function */
+int
+evdns_server_request_add_srv_reply(struct evdns_server_request *req, const char *name, struct evdns_reply_srv *srv, int ttl)
+{
+	char data[sizeof(struct evdns_reply_srv) + EVDNS_NAME_MAX];
+	int len = sizeof(struct evdns_reply_srv);
+	memcpy(data, srv, len);
+	evutil_snprintf(data + len, sizeof(data) - len, "%s", srv->name);
+	return evdns_server_request_add_reply(
+		  req, EVDNS_ANSWER_SECTION, name, TYPE_SRV, CLASS_INET,
+		  ttl, -1, 1, data);
 }
 
 /* exported function */
@@ -2821,6 +2874,13 @@ evdns_server_request_format_response(struct server_request *req, int err)
 						parts--;
 						p += len + 1;
 					}
+				} else if (item->type == EVDNS_TYPE_SRV) {
+					APPEND16(item->addon.srv->priority);
+					APPEND16(item->addon.srv->weight);
+					APPEND16(item->addon.srv->port);
+					r = dnsname_to_labels(buf, buf_len, j, item->addon.srv->name, strlen(item->addon.srv->name), &table);
+					if (r < 0) goto overflow;
+					j = r;
 				} else {
 					r = dnsname_to_labels(buf, buf_len, j, item->data, strlen(item->data), &table);
 					if (r < 0) goto overflow;
@@ -2946,6 +3006,9 @@ server_request_free_answers(struct server_request *req)
 			} else if (victim->type == EVDNS_TYPE_TXT) {
 				EVDNS_VICTIM_FREE_NULL(victim->addon.txt->text);
 				EVDNS_VICTIM_FREE_NULL(victim->addon.txt);
+			} else if (victim->type == EVDNS_TYPE_SRV) {
+				EVDNS_VICTIM_FREE_NULL(victim->addon.srv->name);
+				EVDNS_VICTIM_FREE_NULL(victim->addon.srv);
 			}
 			EVDNS_VICTIM_FREE_NULL(victim->name);
 			EVDNS_VICTIM_FREE_NULL(victim->data);
@@ -4246,6 +4309,19 @@ int evdns_resolve_txt(const char *name, int flags,
 		? 0 : -1;
 }
 
+/* exported function */
+struct evdns_request *
+evdns_base_resolve_srv(struct evdns_base *base, const char *name, int flags,
+    evdns_callback_type callback, void *ptr) {
+	return _evdns_base_resolve_by_type(base, name, flags, callback, ptr, TYPE_SRV);
+}
+
+int evdns_resolve_srv(const char *name, int flags,
+					   evdns_callback_type callback, void *ptr)
+{
+	return evdns_base_resolve_srv(current_base, name, flags, callback, ptr)
+		? 0 : -1;
+}
 
 /* ================================================================= */
 /* Search support */

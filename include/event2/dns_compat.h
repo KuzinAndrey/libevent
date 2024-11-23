@@ -296,6 +296,23 @@ int evdns_resolve_soa(const char *name, int flags, evdns_callback_type callback,
 EVENT2_EXPORT_SYMBOL
 int evdns_resolve_txt(const char *name, int flags, evdns_callback_type callback, void *ptr);
 
+/**
+  Lookup an SRV record for a given name.
+
+  @deprecated This function is deprecated because it does not allow the
+    caller to specify which evdns_base it applies to.  The recommended
+    function is evdns_base_resolve_srv().
+
+  @param name a DNS hostname
+  @param flags either 0, or DNS_QUERY_NO_SEARCH to disable searching for this query.
+  @param callback a callback function to invoke when the request is completed
+  @param ptr an argument to pass to the callback function
+  @return 0 if successful, or -1 if an error occurred
+  @see evdns_resolve_ipv6(), evdns_resolve_reverse(), evdns_resolve_reverse_ipv6()
+ */
+EVENT2_EXPORT_SYMBOL
+int evdns_resolve_srv(const char *name, int flags, evdns_callback_type callback, void *ptr);
+
 struct in_addr;
 struct in6_addr;
 
