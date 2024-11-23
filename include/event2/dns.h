@@ -612,7 +612,7 @@ void evdns_cancel_request(struct evdns_base *base, struct evdns_request *req);
   @param base the evdns_base to which to apply this operation. base must not be NULL.
   @param option the name of the configuration option to be modified
   @param val the value to be set
-  @return 0 if successful, or -1 if an error occurred
+  @return 0 if successful, or -1 if an error occurred, -2 for unknown option name
  */
 EVENT2_EXPORT_SYMBOL
 int evdns_base_set_option(struct evdns_base *base, const char *option, const char *val);
