@@ -1008,6 +1008,24 @@ evdns_requests_pump_waiting_queue(struct evdns_base *base) {
 	}
 }
 
+static int
+_request_type_to_user_cb_type(int type) {
+	switch (type) {
+	case TYPE_A:	return DNS_IPv4_A;
+	case TYPE_NS:	return DNS_NS;
+	case TYPE_CNAME:return DNS_CNAME;
+	case TYPE_SOA:	return DNS_SOA;
+	case TYPE_PTR:	return DNS_PTR;
+	case TYPE_MX:	return DNS_MX;
+	case TYPE_TXT:	return DNS_TXT;
+	case TYPE_AAAA:	return DNS_IPv6_AAAA;
+	case TYPE_SRV:	return DNS_SRV;
+	default:
+		EVUTIL_ASSERT(0);
+		return -1;
+	}
+}
+
 static void
 reply_run_callback(struct event_callback *d, void *user_pointer)
 {
@@ -1015,8 +1033,17 @@ reply_run_callback(struct event_callback *d, void *user_pointer)
 	struct evdns_request *handle =
 	    EVUTIL_UPCAST(d, struct evdns_request, deferred);
 
-	if (handle->have_reply) {
-		switch (handle->request_type) {
+	if (!handle->have_reply) {
+		if (handle->reply.have_authority) {
+			handle->user_callback(handle->err, DNS_SOA_AUTH, 1, handle->ttl,
+				&handle->reply.authority, user_pointer);
+		}
+		handle->user_callback(handle->err, _request_type_to_user_cb_type(handle->request_type),
+			0, handle->ttl, NULL, user_pointer);
+		goto free_exit;
+	}
+
+	switch (handle->request_type) {
 		case TYPE_A:
 			if (handle->reply.cname)
 				handle->user_callback(DNS_ERR_NONE, DNS_CNAME, 1,
@@ -1109,16 +1136,9 @@ reply_run_callback(struct event_callback *d, void *user_pointer)
 			break;
 		default:
 			EVUTIL_ASSERT(0);
-		} // switch
-	} else {
-		if (handle->reply.have_authority) {
-			handle->user_callback(handle->err, DNS_SOA_AUTH, 1, handle->ttl,
-				&handle->reply.authority, user_pointer);
-		}
-		handle->user_callback(handle->err, handle->request_type, 0, handle->ttl,
-			NULL, user_pointer);
-	}
+	} // switch
 
+free_exit:
 	if (handle->reply.data.raw) {
 		mm_free(handle->reply.data.raw);
 	}
