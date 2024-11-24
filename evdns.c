@@ -4911,6 +4911,7 @@ evdns_base_set_option_impl(struct evdns_base *base,
 		log(EVDNS_LOG_DEBUG, "Setting edns-udp-size to %d", sz);
 		base->global_max_udp_size = sz;
 	} else return -2;
+	return 0;
 }
 
 int
